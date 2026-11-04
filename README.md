@@ -47,18 +47,31 @@ mvn test
 docker compose --profile bench run --rm bench --modo=eventual --w=1 --r=1 --rotulo=R1W1
 ```
 
-Resultado da primeira rodada local (N=3, 400 operações, 40 chaves, concorrência 16):
+### Obsolescência (N=3, 400 operações, 40 chaves, concorrência 16)
 
-| Config | Leituras obsoletas | Escrita p50 | Leitura p50 |
-|---|---|---|---|
-| `R=2 W=2` forte | **0,00%** | 59 ms | 55 ms |
-| `R=1 W=1` eventual | **13,25%** | 47 ms | 37 ms |
-| `R=1 W=1` causal | **0,00%** | 15 ms | 18 ms |
-| `R=3 W=3` forte | **0,00%** | 37 ms | 28 ms |
+| Config | Leituras avaliadas | Leituras obsoletas |
+|---|---|---|
+| `R=2 W=2` forte | 400 | **0,00%** |
+| `R=3 W=3` forte | 400 | **0,00%** |
+| `R=1 W=1` causal | 400 | **0,00%** |
+| `R=1 W=1` eventual | 400 | **13,25%** |
 
-A coluna de obsolescência é o resultado sólido e reproduz o esperado: `R+W > N` elimina leitura obsoleta, `R=W=1` não.
+Reproduz o esperado: `R+W > N` elimina leitura obsoleta; `R=W=1` não. O modo causal chega a zero **sem** pagar quórum, porque recusa (409) em vez de servir estado anterior ao contexto do cliente.
 
-**As latências desta tabela não servem para o relatório ainda.** Foram medidas com os 5 nós e o bench na mesma máquina, numa única rodada curta, sem aquecimento — por isso `R=3 W=3` aparece mais rápido que `R=2 W=2`, o que é artefato de JIT e não um achado. Para o relatório use `scripts/experimentos.ps1`, que faz aquecimento, repete cada configuração e alterna a ordem.
+Este é o resultado sólido do trabalho: a detecção é lógica, por dominância de relógio vetorial, não temporal — não depende de relógio de parede nem da carga da máquina.
+
+### Latência (com aquecimento, via `scripts/experimentos.ps1`)
+
+| Config | Escrita p50 | Leitura p50 |
+|---|---|---|
+| `R=1 W=1` eventual | 49,6 ms | 33,6 ms |
+| `R=1 W=1` causal | 48,5 ms | 39,0 ms |
+| `R=2 W=2` forte | 54,0 ms | 44,4 ms |
+| `R=3 W=3` forte | 61,8 ms | 57,3 ms |
+
+O custo da consistência aparece de forma monotônica: esperar mais réplicas custa latência.
+
+**Importante:** sem a rodada de aquecimento esta tabela sai invertida — `R=3 W=3` aparece *mais rápido* que `R=2 W=2`, que é artefato de JIT e não um achado. Use sempre `scripts/experimentos.ps1`, que descarta o aquecimento, repete cada configuração e alterna a ordem. E note que são 5 JVMs e o bench competindo pelos mesmos núcleos: os valores absolutos medem um cluster co-residente, só a tendência é significativa.
 
 ---
 

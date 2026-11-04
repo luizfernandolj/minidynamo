@@ -1,0 +1,94 @@
+# Cinco nos identicos. O unico diferencial entre eles e NODE_ID: a topologia
+# inteira vem da variavel PEERS, igual para todos.
+#
+#   docker compose up --build          -> sobe o cluster
+#   docker compose --profile bench run --rm bench   -> roda um experimento
+#   docker compose stop node3          -> cenario de falha: queda de no
+
+x-no-comum: &no-comum
+  build: .
+  image: minidynamo:1.0.0
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+    interval: 3s
+    timeout: 2s
+    retries: 10
+    start_period: 2s
+  networks: [dynamo]
+
+x-env-comum: &env-comum
+  HTTP_PORT: "8080"
+  PEERS: "node1@node1:8080,node2@node2:8080,node3@node3:8080,node4@node4:8080,node5@node5:8080"
+  # N = quantas replicas cada chave tem. R e W sao por requisicao; estes sao
+  # apenas os padroes quando o cliente nao manda nada.
+  REPLICATION_N: "3"
+  VNODES: "128"
+  RPC_TIMEOUT_MS: "800"
+  REPLICATION_TIMEOUT_MS: "1500"
+
+services:
+  node1:
+    <<: *no-comum
+    container_name: md-node1
+    environment:
+      <<: *env-comum
+      NODE_ID: node1
+    ports: ["8081:8080"]
+
+  node2:
+    <<: *no-comum
+    container_name: md-node2
+    environment:
+      <<: *env-comum
+      NODE_ID: node2
+    ports: ["8082:8080"]
+
+  node3:
+    <<: *no-comum
+    container_name: md-node3
+    environment:
+      <<: *env-comum
+      NODE_ID: node3
+    ports: ["8083:8080"]
+
+  node4:
+    <<: *no-comum
+    container_name: md-node4
+    environment:
+      <<: *env-comum
+      NODE_ID: node4
+    ports: ["8084:8080"]
+
+  node5:
+    <<: *no-comum
+    container_name: md-node5
+    environment:
+      <<: *env-comum
+      NODE_ID: node5
+    ports: ["8085:8080"]
+
+  # Gerador de carga + verificador de consistencia. Nao sobe com o cluster:
+  # roda sob demanda e termina, anexando uma linha em resultados/resultados.csv.
+  #
+  #   docker compose --profile bench run --rm bench --modo=eventual --rotulo=R1W1
+  bench:
+    build: .
+    image: minidynamo:1.0.0
+    profiles: ["bench"]
+    networks: [dynamo]
+    depends_on:
+      node1: {condition: service_healthy}
+      node2: {condition: service_healthy}
+      node3: {condition: service_healthy}
+      node4: {condition: service_healthy}
+      node5: {condition: service_healthy}
+    environment:
+      NODES: "http://node1:8080,http://node2:8080,http://node3:8080,http://node4:8080,http://node5:8080"
+    volumes:
+      - ./resultados:/app/resultados
+    entrypoint: ["java", "-cp", "/app/minidynamo.jar", "sd.minidynamo.bench.Bench"]
+
+networks:
+  dynamo:
+    driver: bridge

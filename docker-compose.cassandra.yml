@@ -1,0 +1,74 @@
+# Cluster Cassandra de 3 nos para COMPARACAO com a nossa implementacao.
+#
+# Vale muito no seminario: a mesma demo (CL=ONE / QUORUM / ALL, derrubar um no)
+# rodada contra um sistema de producao, ao lado da nossa. Cobre o item
+# "levantamento de ferramentas" do enunciado com pratica, nao so citacao.
+#
+#   docker compose -f docker-compose.cassandra.yml up -d
+#   docker exec -it cass1 cqlsh
+#
+# Dentro do cqlsh:
+#   CREATE KEYSPACE loja WITH replication =
+#     {'class':'SimpleStrategy','replication_factor':3};
+#   USE loja;
+#   CREATE TABLE carrinho (id text PRIMARY KEY, itens text);
+#   CONSISTENCY QUORUM;          -- equivale ao nosso modo forte
+#   INSERT INTO carrinho (id, itens) VALUES ('c1', 'livro');
+#   CONSISTENCY ONE;             -- equivale ao nosso modo eventual
+#   SELECT * FROM carrinho;
+#
+# Depois: docker compose -f docker-compose.cassandra.yml stop cass3
+#   CONSISTENCY ALL;   -> falha (NoHostAvailable / unavailable)
+#   CONSISTENCY QUORUM;-> continua funcionando com 2 de 3
+#
+# ATENCAO: cada no de Cassandra pede ~1 GB de RAM. Com MAX_HEAP_SIZE=512M os
+# tres rodam em ~3 GB. Suba um no de cada vez: o Cassandra nao gosta de varios
+# nos entrando no cluster simultaneamente (use o healthcheck + depends_on).
+
+x-cass-comum: &cass-comum
+  image: cassandra:5.0
+  environment: &cass-env
+    CASSANDRA_CLUSTER_NAME: comparacao-sd
+    CASSANDRA_SEEDS: cass1
+    CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    CASSANDRA_DC: dc1
+    MAX_HEAP_SIZE: 512M
+    HEAP_NEWSIZE: 128M
+  healthcheck:
+    test: ["CMD-SHELL", "nodetool status | grep -q '^UN'"]
+    interval: 15s
+    timeout: 10s
+    retries: 20
+    start_period: 60s
+  networks: [cass]
+
+services:
+  cass1:
+    <<: *cass-comum
+    container_name: cass1
+    environment:
+      <<: *cass-env
+      CASSANDRA_BROADCAST_ADDRESS: cass1
+    ports: ["9042:9042"]
+
+  cass2:
+    <<: *cass-comum
+    container_name: cass2
+    environment:
+      <<: *cass-env
+      CASSANDRA_BROADCAST_ADDRESS: cass2
+    depends_on:
+      cass1: {condition: service_healthy}
+
+  cass3:
+    <<: *cass-comum
+    container_name: cass3
+    environment:
+      <<: *cass-env
+      CASSANDRA_BROADCAST_ADDRESS: cass3
+    depends_on:
+      cass2: {condition: service_healthy}
+
+networks:
+  cass:
+    driver: bridge

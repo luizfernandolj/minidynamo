@@ -60,6 +60,19 @@ public final class HashRing {
         return new ArrayList<>(escolhidos);
     }
 
+    /**
+     * Todos os nos na ordem em que o anel os visita a partir da chave.
+     *
+     * Os primeiros N formam a lista de preferencia; os seguintes sao os
+     * candidatos a substituto no hinted handoff, ja na ordem certa de
+     * preferencia. Escolher o substituto pelo anel, e nao ao acaso, mantem a
+     * escolha deterministica: qualquer coordenador que precise substituir a
+     * mesma replica chega ao mesmo substituto.
+     */
+    public List<String> ordemCompleta(String chave) {
+        return listaDePreferencia(chave, nosFisicos.size());
+    }
+
     /** Quantas chaves de uma amostra caem como dono em cada no. Para o relatorio. */
     public Map<String, Integer> distribuicao(int amostras) {
         var contagem = new TreeMap<String, Integer>();

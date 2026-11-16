@@ -92,7 +92,7 @@ public final class Bench {
         String valor = "v" + idx + "-" + System.nanoTime();
 
         String noEscrita = cfg.nos().get(rnd.nextInt(cfg.nos().size()));
-        var escrita = cliente.escrever(noEscrita, chave, valor, null, cfg.modo(), cfg.w());
+        var escrita = cliente.escrever(noEscrita, chave, valor, null, cfg.modo(), cfg.w(), cfg.sloppy());
 
         est.registrarEscrita(escrita.latenciaNanos(), escrita.ok(), escrita.status());
         if (!escrita.ok() || escrita.corpo() == null) {
@@ -176,7 +176,7 @@ public final class Bench {
 
         var sb = new StringBuilder();
         if (novo) {
-            sb.append("rotulo,modo,r,w,operacoes,chaves,concorrencia,")
+            sb.append("rotulo,modo,r,w,sloppy,operacoes,chaves,concorrencia,")
               .append("escritas_ok,escritas_erro,leituras_ok,leituras_erro,")
               .append("leituras_avaliadas,leituras_obsoletas,pct_obsoletas,")
               .append("conflitos,recusas_causais,")
@@ -191,8 +191,9 @@ public final class Bench {
 
     // ------------------------------------------------------------- configuracao
 
-    record BenchConfig(List<String> nos, String modo, Integer r, Integer w, int operacoes,
-                       int chaves, int concorrencia, long timeoutMs, String rotulo, String csv) {
+    record BenchConfig(List<String> nos, String modo, Integer r, Integer w, Boolean sloppy,
+                       int operacoes, int chaves, int concorrencia, long timeoutMs,
+                       String rotulo, String csv) {
 
         static BenchConfig de(String[] args) {
             var mapa = new java.util.HashMap<String, String>();
@@ -211,6 +212,7 @@ public final class Bench {
                     valor(mapa, "modo", "MODO", "forte"),
                     inteiroOuNulo(valor(mapa, "r", "R", null)),
                     inteiroOuNulo(valor(mapa, "w", "W", null)),
+                    booleanoOuNulo(valor(mapa, "sloppy", "SLOPPY", null)),
                     Integer.parseInt(valor(mapa, "ops", "OPS", "300")),
                     Integer.parseInt(valor(mapa, "chaves", "CHAVES", "50")),
                     // Sem limite de concorrencia a medicao perde sentido: as
@@ -232,10 +234,15 @@ public final class Bench {
             return (s == null || s.isBlank()) ? null : Integer.valueOf(s);
         }
 
+        private static Boolean booleanoOuNulo(String s) {
+            return (s == null || s.isBlank()) ? null : Boolean.valueOf(s);
+        }
+
         String descricao() {
             return String.format(
-                    "=== bench [%s] modo=%s R=%s W=%s ops=%d chaves=%d concorrencia=%d nos=%d ===",
+                    "=== bench [%s] modo=%s R=%s W=%s sloppy=%s ops=%d chaves=%d concorrencia=%d nos=%d ===",
                     rotulo, modo, r == null ? "padrao" : r, w == null ? "padrao" : w,
+                    sloppy == null ? "padrao" : sloppy,
                     operacoes, chaves, concorrencia, nos.size());
         }
     }
@@ -340,9 +347,10 @@ public final class Bench {
 
         String comoCsv() {
             return String.format(Locale.US,
-                    "%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.2f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f%n",
+                    "%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.2f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f%n",
                     cfg.rotulo(), cfg.modo(),
                     cfg.r() == null ? "" : cfg.r(), cfg.w() == null ? "" : cfg.w(),
+                    cfg.sloppy() == null ? "" : cfg.sloppy(),
                     cfg.operacoes(), cfg.chaves(), cfg.concorrencia(),
                     escritasOk, escritasErro, leiturasOk, leiturasErro,
                     avaliadas, obsoletas, pctObsoletas, conflitos, recusasCausais,

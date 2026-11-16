@@ -67,24 +67,48 @@ public final class Coordenador {
             return this == FORTE ? cfg.quorumPadrao() : 1;
         }
 
+        /**
+         * Quorum relaxado (sloppy) por padrao em eventual e causal, desligado
+         * em forte.
+         *
+         * O motivo e que substituto NAO preserva a intersecao de quoruns: se a
+         * escrita foi confirmada por um no fora da lista de preferencia, uma
+         * leitura com R replicas da lista pode nao cruzar com ela, e R+W > N
+         * deixa de garantir o que promete. Em modo forte isso destruiria a
+         * propriedade que o modo existe para oferecer, entao ali preferimos
+         * recusar a escrita. Em eventual e causal, disponibilidade e o objetivo
+         * declarado e o relaxamento e coerente -- e e o comportamento do Dynamo.
+         */
+        public boolean sloppyPadrao() {
+            return this != FORTE;
+        }
+
         public String rotulo() {
             return name().toLowerCase();
         }
     }
 
-    /** Resultado de um RPC a uma replica. Nunca lanca: o erro vem no campo. */
-    private record Ack(String no, boolean ok, List<Versioned> versoes, String erro) {
+    /**
+     * Resultado de um RPC a uma replica. Nunca lanca: o erro vem no campo.
+     * {@code substituto} preenchido significa que a replica estava fora e
+     * outro no aceitou guardar a escrita em nome dela (hinted handoff).
+     */
+    private record Ack(String no, boolean ok, List<Versioned> versoes, String erro, String substituto) {
 
         static Ack sucesso(String no) {
-            return new Ack(no, true, List.of(), null);
+            return new Ack(no, true, List.of(), null, null);
         }
 
         static Ack sucesso(String no, List<Versioned> versoes) {
-            return new Ack(no, true, versoes, null);
+            return new Ack(no, true, versoes, null, null);
+        }
+
+        static Ack viaSubstituto(String no, String substituto) {
+            return new Ack(no, true, List.of(), null, substituto);
         }
 
         static Ack falha(String no, String erro) {
-            return new Ack(no, false, List.of(), erro);
+            return new Ack(no, false, List.of(), erro, null);
         }
     }
 
@@ -108,12 +132,19 @@ public final class Coordenador {
     // ------------------------------------------------------------------ escrita
 
     public Dtos.RespostaEscrita escrever(String chave, String valor, VersionVector contexto,
-                                         Modo modo, Integer wPedido, boolean remocao) {
+                                         Modo modo, Integer wPedido, Boolean sloppyPedido,
+                                         boolean remocao) {
         long t0 = System.nanoTime();
         int n = cfg.n();
         int w = wPedido != null ? wPedido : modo.wPadrao(cfg);
+        boolean sloppy = sloppyPedido != null ? sloppyPedido : modo.sloppyPadrao();
 
         var pref = ring.listaDePreferencia(chave, n);
+        // Candidatos a substituto: os nos seguintes no anel, fora da lista de
+        // preferencia. Deterministico, logo dois coordenadores que precisem
+        // substituir a mesma replica escolhem o mesmo no.
+        var substitutos = new ArrayList<>(ring.ordemCompleta(chave));
+        substitutos.removeAll(pref);
 
         // De onde parte o relogio da nova versao:
         //  - se o cliente mandou contexto (leu antes), partimos dele: a escrita
@@ -129,6 +160,7 @@ public final class Coordenador {
 
         int ok = 0;
         var falharam = new ArrayList<String>();
+        var hints = new ArrayList<String>();
 
         // O coordenador grava localmente primeiro quando e uma das replicas.
         // Assim o dado sobrevive mesmo se o quorum nao fechar -- e exatamente
@@ -141,6 +173,10 @@ public final class Coordenador {
 
         var cs = new ExecutorCompletionService<Ack>(executor);
         int pendentes = 0;
+        // Cada replica que falhar tenta um substituto diferente, para nao
+        // concentrar todos os hints num unico no.
+        var proximoSubstituto = new java.util.concurrent.atomic.AtomicInteger(0);
+
         for (String no : pref) {
             if (no.equals(cfg.noId())) continue;
             final String destino = no;
@@ -148,8 +184,24 @@ public final class Coordenador {
                 try {
                     peers.gravarRemoto(destino, chave, versao);
                     return Ack.sucesso(destino);
-                } catch (Exception e) {
-                    return Ack.falha(destino, e.getMessage());
+                } catch (Exception falhaDaReplica) {
+                    if (!sloppy) {
+                        return Ack.falha(destino, falhaDaReplica.getMessage());
+                    }
+                    // Hinted handoff: a replica certa esta fora; procura quem
+                    // segure a escrita em nome dela.
+                    int inicio = proximoSubstituto.getAndIncrement();
+                    for (int i = 0; i < substitutos.size(); i++) {
+                        String candidato = substitutos.get((inicio + i) % substitutos.size());
+                        if (candidato.equals(cfg.noId())) continue;
+                        try {
+                            peers.gravarHint(candidato, destino, chave, versao);
+                            return Ack.viaSubstituto(destino, candidato);
+                        } catch (Exception falhaDoSubstituto) {
+                            // tenta o proximo do anel
+                        }
+                    }
+                    return Ack.falha(destino, falhaDaReplica.getMessage());
                 }
             });
             pendentes++;
@@ -166,6 +218,10 @@ public final class Coordenador {
                 var ack = f.get();
                 if (ack.ok()) {
                     ok++;
+                    if (ack.substituto() != null) {
+                        hints.add(ack.no() + " via " + ack.substituto());
+                        metricas.hintsCriados().increment();
+                    }
                 } else {
                     falharam.add(ack.no());
                     metricas.rpcFalhou().increment();
@@ -186,7 +242,7 @@ public final class Coordenador {
 
         return new Dtos.RespostaEscrita(
                 chave, relogio.comoMapa(), cfg.noId(), modo.rotulo(),
-                w, n, ok, List.copyOf(falharam), atingiu, duracaoMs);
+                w, n, ok, List.copyOf(falharam), List.copyOf(hints), sloppy, atingiu, duracaoMs);
     }
 
     // ------------------------------------------------------------------ leitura

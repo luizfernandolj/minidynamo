@@ -40,6 +40,14 @@ public final class Dtos {
     public record RespostaInterna(String no, List<VersaoDto> versoes) {
     }
 
+    /**
+     * Resposta do GET /internal/digest: para cada chave, o vetor que resume o
+     * que esta replica conhece. E o que a anti-entropia compara para decidir o
+     * que empurrar e o que puxar, sem transferir os valores.
+     */
+    public record Digest(String no, Map<String, Map<String, Long>> relogios) {
+    }
+
     /** Resposta do GET /kv/{chave} para o cliente. */
     public record RespostaLeitura(
             String chave,
@@ -68,6 +76,9 @@ public final class Dtos {
             int n,
             int replicasOk,
             List<String> replicasFalharam,
+            /** "node3 via node5": a replica estava fora e um substituto guardou a escrita. */
+            List<String> hints,
+            boolean sloppy,
             boolean quorumAtingido,
             long duracaoMs
     ) {

@@ -39,8 +39,11 @@ public final class ClienteKv {
     }
 
     public Resultado<Dtos.RespostaEscrita> escrever(String baseUrl, String chave, String valor,
-                                                    Map<String, Long> contexto, String modo, Integer w) {
-        String url = baseUrl + "/kv/" + enc(chave) + "?modo=" + modo + (w == null ? "" : "&w=" + w);
+                                                    Map<String, Long> contexto, String modo, Integer w,
+                                                    Boolean sloppy) {
+        String url = baseUrl + "/kv/" + enc(chave) + "?modo=" + modo
+                + (w == null ? "" : "&w=" + w)
+                + (sloppy == null ? "" : "&sloppy=" + sloppy);
         String corpo = Json.escrever(new Dtos.PedidoEscrita(valor, contexto));
 
         var req = HttpRequest.newBuilder(URI.create(url))

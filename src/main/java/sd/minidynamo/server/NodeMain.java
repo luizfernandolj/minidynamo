@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import sd.minidynamo.core.HashRing;
+import sd.minidynamo.core.HintStore;
 import sd.minidynamo.core.Store;
 import sd.minidynamo.core.VersionVector;
 import sd.minidynamo.core.Versioned;
@@ -35,14 +36,21 @@ public final class NodeMain {
         var peers = new PeerClient(cfg, chaos, executor);
         var coordenador = new Coordenador(cfg, store, ring, peers, metricas, executor);
 
+        var hints = new HintStore();
+        var handoff = new HintedHandoff(cfg, hints, peers, metricas);
+        var antiEntropia = new AntiEntropia(cfg, store, ring, peers, metricas);
+
         var app = Javalin.create(c -> {
             c.showJavalinBanner = false;
         });
 
         registrarRotasCliente(app, cfg, coordenador);
-        registrarRotasInternas(app, cfg, store);
+        registrarRotasInternas(app, cfg, store, hints);
         registrarRotasCaos(app, chaos);
-        registrarRotasDiagnostico(app, cfg, store, ring, metricas, chaos);
+        registrarRotasDiagnostico(app, cfg, store, ring, metricas, chaos, hints, handoff, antiEntropia);
+
+        handoff.iniciar();
+        antiEntropia.iniciar();
 
         app.exception(IllegalArgumentException.class, (e, ctx) ->
                 responder(ctx, 400, new Dtos.Erro("requisicao invalida", e.getMessage())));
@@ -50,6 +58,8 @@ public final class NodeMain {
                 responder(ctx, 500, new Dtos.Erro("erro interno", String.valueOf(e.getMessage()))));
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            handoff.close();
+            antiEntropia.close();
             app.stop();
             executor.close();
         }));
@@ -57,8 +67,11 @@ public final class NodeMain {
         app.start("0.0.0.0", cfg.porta());
 
         System.out.printf(
-                "[%s] MiniDynamo no ar em :%d | N=%d R=%d W=%d | vnodes=%d | peers=%s%n",
+                "[%s] MiniDynamo no ar em :%d | N=%d R=%d W=%d | vnodes=%d%n"
+                        + "       hints a cada %dms | anti-entropia %s | peers=%s%n",
                 cfg.noId(), cfg.porta(), cfg.n(), cfg.r(), cfg.w(), cfg.vnodes(),
+                cfg.entregaDeHintsMs(),
+                cfg.antiEntropiaLigada() ? "a cada " + cfg.antiEntropiaMs() + "ms" : "desligada",
                 cfg.idsDosNos());
     }
 
@@ -83,7 +96,8 @@ public final class NodeMain {
                     : contextoDoHeader(ctx);
 
             var modo = Coordenador.Modo.de(ctx.queryParam("modo"));
-            var resp = coord.escrever(chave, pedido.valor(), contexto, modo, inteiro(ctx, "w"), false);
+            var resp = coord.escrever(chave, pedido.valor(), contexto, modo,
+                    inteiro(ctx, "w"), booleano(ctx, "sloppy"), false);
             responder(ctx, resp.quorumAtingido() ? 200 : 503, resp);
         });
 
@@ -108,14 +122,15 @@ public final class NodeMain {
         app.delete("/kv/{chave}", ctx -> {
             String chave = ctx.pathParam("chave");
             var modo = Coordenador.Modo.de(ctx.queryParam("modo"));
-            var resp = coord.escrever(chave, null, contextoDoHeader(ctx), modo, inteiro(ctx, "w"), true);
+            var resp = coord.escrever(chave, null, contextoDoHeader(ctx), modo,
+                    inteiro(ctx, "w"), booleano(ctx, "sloppy"), true);
             responder(ctx, resp.quorumAtingido() ? 200 : 503, resp);
         });
     }
 
     // ------------------------------------------------------------- API interna
 
-    private static void registrarRotasInternas(Javalin app, Config cfg, Store store) {
+    private static void registrarRotasInternas(Javalin app, Config cfg, Store store, HintStore hints) {
 
         // Escrita de replica: aplica local e nao coordena nada. Sem isso
         // teriamos recursao infinita entre coordenadores.
@@ -131,6 +146,27 @@ public final class NodeMain {
             List<Versioned> versoes = store.ler(chave);
             responder(ctx, 200, new Dtos.RespostaInterna(
                     cfg.noId(), versoes.stream().map(Dtos.VersaoDto::de).toList()));
+        });
+
+        // Hinted handoff: guarda a escrita EM NOME de outro no.
+        // Repare que nao vai para o Store local: este no nao e replica desta
+        // chave e nao deve servi-la em leitura. Fica retida ate a entrega.
+        app.put("/internal/hint/{destino}/{chave}", ctx -> {
+            String destino = ctx.pathParam("destino");
+            String chave = ctx.pathParam("chave");
+            var pedido = Json.ler(ctx.body(), Dtos.PedidoReplicacao.class);
+            hints.guardar(destino, chave, pedido.versao().paraDominio());
+            responder(ctx, 200, Map.of(
+                    "no", cfg.noId(), "guardadoEmNomeDe", destino, "pendentes", hints.total()));
+        });
+
+        // Resumo do que esta replica conhece, para a anti-entropia comparar
+        // sem transferir valores.
+        app.get("/internal/digest", ctx -> {
+            var relogios = new java.util.TreeMap<String, Map<String, Long>>();
+            store.dump().keySet().forEach(chave ->
+                    relogios.put(chave, store.relogioDe(chave).comoMapa()));
+            responder(ctx, 200, new Dtos.Digest(cfg.noId(), relogios));
         });
     }
 
@@ -171,12 +207,42 @@ public final class NodeMain {
     // ------------------------------------------------------------- diagnostico
 
     private static void registrarRotasDiagnostico(Javalin app, Config cfg, Store store,
-                                                  HashRing ring, Metricas metricas, Chaos chaos) {
+                                                  HashRing ring, Metricas metricas, Chaos chaos,
+                                                  HintStore hints, HintedHandoff handoff,
+                                                  AntiEntropia antiEntropia) {
 
         app.get("/health", ctx -> responder(ctx, 200, Map.of(
                 "no", cfg.noId(),
                 "chaveslocais", store.totalDeChaves(),
+                "hintsPendentes", hints.total(),
                 "caosSaudavel", chaos.saudavel())));
+
+        // Hints retidos aqui em nome de outros nos. Durante a demo de queda,
+        // este numero sobe enquanto o no esta fora e zera quando ele volta.
+        app.get("/debug/hints", ctx -> responder(ctx, 200, Map.of(
+                "no", cfg.noId(),
+                "pendentesPorDestino", hints.resumo(),
+                "total", hints.total(),
+                "guardadosDesdeOInicio", hints.guardados(),
+                "entreguesDesdeOInicio", hints.entregues())));
+
+        // Forca a entrega sem esperar o proximo tique -- util na apresentacao.
+        app.post("/debug/hints/entregar", ctx -> responder(ctx, 200, Map.of(
+                "no", cfg.noId(),
+                "entreguesAgora", handoff.tentarEntregarTudo(),
+                "aindaPendentes", hints.total())));
+
+        // Forca uma rodada de anti-entropia com um par especifico.
+        app.post("/debug/antientropia/{par}", ctx -> {
+            String par = ctx.pathParam("par");
+            try {
+                responder(ctx, 200, Map.of(
+                        "no", cfg.noId(), "par", par,
+                        "chavesSincronizadas", antiEntropia.sincronizarCom(par)));
+            } catch (Exception e) {
+                responder(ctx, 503, new Dtos.Erro("par inalcancavel", String.valueOf(e.getMessage())));
+            }
+        });
 
         app.get("/metrics", ctx -> ctx.contentType("text/plain; version=0.0.4")
                 .result(metricas.scrape()));
@@ -230,6 +296,13 @@ public final class NodeMain {
         } catch (Exception e) {
             throw new IllegalArgumentException("X-Contexto nao e um vetor JSON valido: " + bruto);
         }
+    }
+
+    /** null = usar o padrao do modo; true/false = o cliente decidiu. */
+    private static Boolean booleano(Context ctx, String nome) {
+        String v = ctx.queryParam(nome);
+        if (v == null || v.isBlank()) return null;
+        return Boolean.valueOf(v);
     }
 
     private static Integer inteiro(Context ctx, String nome) {

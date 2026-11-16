@@ -15,6 +15,17 @@ param(
     [int]$Ops = 400,
     [int]$Chaves = 40,
     [int]$Concorrencia = 16,
+    # Latencia injetada em CADA RPC entre nos, antes das rodadas.
+    #
+    # Sem ela o experimento nao mede o que promete: num cluster ocioso a
+    # replicacao em background termina dentro dos ~50 ms da propria escrita,
+    # a janela de obsolescencia fecha antes da leitura e o modo eventual
+    # aparece com ~0% de leituras obsoletas -- nao porque seja consistente,
+    # mas porque a janela e curta demais para ser observada. Com a janela
+    # controlada, o numero passa a ser reprodutivel e explicavel.
+    [int]$LatenciaMs = 0,
+    [int]$JitterMs = 0,
+    [string]$BaseUrl = 'http://localhost:808',
     [string]$Csv = 'resultados/resultados.csv'
 )
 
@@ -43,8 +54,34 @@ function Rodar($cfg, $rotulo, $csv) {
         "--concorrencia=$Concorrencia" "--csv=$csv"
 }
 
+function AplicarLatencia($ms, $jitter) {
+    foreach ($i in 1..5) {
+        Invoke-RestMethod -Method Post -Uri "$BaseUrl$i/chaos/latencia" `
+            -Body (@{ ms = $ms; jitterMs = $jitter } | ConvertTo-Json -Compress) `
+            -ContentType 'application/json' -TimeoutSec 10 | Out-Null
+    }
+}
+
+function CurarTudo {
+    foreach ($i in 1..5) {
+        try {
+            Invoke-RestMethod -Method Post -Uri "$BaseUrl$i/chaos/curar" -TimeoutSec 10 | Out-Null
+        } catch { }
+    }
+}
+
 Push-Location $raiz
 try {
+    $sufixo = ''
+    if ($LatenciaMs -gt 0) {
+        Write-Host ''
+        Write-Host "### injetando ${LatenciaMs}ms (jitter ${JitterMs}ms) em cada RPC entre nos" -ForegroundColor Yellow
+        AplicarLatencia $LatenciaMs $JitterMs
+        $sufixo = "-lat$LatenciaMs"
+    } else {
+        CurarTudo
+    }
+
     Write-Host ''
     Write-Host '### aquecimento (resultado descartado)' -ForegroundColor DarkGray
     # Grava num csv temporario que nao entra no relatorio.
@@ -62,9 +99,15 @@ try {
         $ordem = if ($i % 2 -eq 0) { $configs[($configs.Count - 1)..0] } else { $configs }
 
         foreach ($cfg in $ordem) {
-            Rodar $cfg "$($cfg.rotulo)-rep$i" $Csv |
+            Rodar $cfg "$($cfg.rotulo)$sufixo-rep$i" $Csv |
                 Select-String -Pattern 'resultado \[|OBSOLET|escrita  p50|leitura  p50|vazao'
         }
+    }
+
+    if ($LatenciaMs -gt 0) {
+        CurarTudo
+        Write-Host ''
+        Write-Host '### latencia removida dos nos' -ForegroundColor Yellow
     }
 
     Write-Host ''

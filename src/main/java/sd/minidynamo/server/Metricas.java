@@ -59,6 +59,24 @@ public final class Metricas {
                 .register(registry);
     }
 
+    public Counter hintsCriados() {
+        return Counter.builder("minidynamo.hints.criados")
+                .tag("no", noId)
+                .register(registry);
+    }
+
+    public Counter hintsEntregues() {
+        return Counter.builder("minidynamo.hints.entregues")
+                .tag("no", noId)
+                .register(registry);
+    }
+
+    public Counter sincronizacoesAntiEntropia() {
+        return Counter.builder("minidynamo.antientropia.chaves.sincronizadas")
+                .tag("no", noId)
+                .register(registry);
+    }
+
     public Counter rpcFalhou() {
         return Counter.builder("minidynamo.rpc.falhou")
                 .tag("no", noId)

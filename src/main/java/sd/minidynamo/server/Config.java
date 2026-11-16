@@ -22,7 +22,10 @@ public record Config(
         int w,
         int vnodes,
         long rpcTimeoutMs,
-        long replicacaoTimeoutMs
+        long replicacaoTimeoutMs,
+        long entregaDeHintsMs,
+        long antiEntropiaMs,
+        boolean antiEntropiaLigada
 ) {
 
     public static Config doAmbiente() {
@@ -60,7 +63,10 @@ public record Config(
                 w,
                 Integer.parseInt(env("VNODES", "128")),
                 Long.parseLong(env("RPC_TIMEOUT_MS", "800")),
-                Long.parseLong(env("REPLICATION_TIMEOUT_MS", "1500"))
+                Long.parseLong(env("REPLICATION_TIMEOUT_MS", "1500")),
+                Long.parseLong(env("HINT_DELIVERY_MS", "2000")),
+                Long.parseLong(env("ANTI_ENTROPY_MS", "5000")),
+                Boolean.parseBoolean(env("ANTI_ENTROPY_ENABLED", "true"))
         );
     }
 

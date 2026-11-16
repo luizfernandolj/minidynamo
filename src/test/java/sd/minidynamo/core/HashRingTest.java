@@ -90,4 +90,33 @@ class HashRingTest {
 
         assertTrue(ring.listaDePreferencia("x", 3).isEmpty());
     }
+
+    @Test
+    @DisplayName("ordem completa comeca pela lista de preferencia")
+    void ordemCompletaComecaPelaPreferencia() {
+        var ring = new HashRing(CINCO, 128);
+
+        var completa = ring.ordemCompleta("carrinho:7");
+        var pref = ring.listaDePreferencia("carrinho:7", 3);
+
+        assertEquals(5, completa.size());
+        assertEquals(5, Set.copyOf(completa).size());
+        // Os substitutos do hinted handoff sao exatamente a cauda desta lista.
+        assertEquals(pref, completa.subList(0, 3));
+    }
+
+    @Test
+    @DisplayName("substitutos sao deterministicos entre coordenadores")
+    void substitutosDeterministicos() {
+        var a = new HashRing(CINCO, 128);
+        var b = new HashRing(CINCO, 128);
+
+        var subsA = new java.util.ArrayList<>(a.ordemCompleta("k"));
+        subsA.removeAll(a.listaDePreferencia("k", 3));
+        var subsB = new java.util.ArrayList<>(b.ordemCompleta("k"));
+        subsB.removeAll(b.listaDePreferencia("k", 3));
+
+        assertEquals(subsA, subsB);
+        assertEquals(2, subsA.size());
+    }
 }

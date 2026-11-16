@@ -14,6 +14,8 @@
 | **Couchbase / CouchDB** | eventual com revisões e resolução de conflito | durabilidade por operação | Linux, Windows, macOS, contêineres |
 
 > O que nos distingue: expomos os **siblings** ao cliente, como Riak e o Dynamo original. Cassandra resolve por last-writer-wins e descarta silenciosamente a escrita concorrente — vale contrastar isso no seminário.
+>
+> Também seguimos o Riak na decisão de tornar o quórum relaxado **explícito**: nosso `?sloppy=` liga e desliga o hinted handoff por requisição, enquanto Dynamo e Cassandra o mantêm sempre ativo. A razão está no [relatório](relatorio.md#6-limitações): sloppy quorum quebra a interseção de quóruns, e deixar isso implícito esconde a perda de garantia.
 
 ## Sistemas de consistência forte (consenso, não quórum)
 
@@ -35,7 +37,7 @@ Contraste central do trabalho: **quórum ≠ consenso**. `R+W > N` dá consistê
 | **Elle** | checador de serializabilidade usado pelo Jepsen | Clojure |
 | **Porcupine** | checador de linearizabilidade em Go | multiplataforma |
 
-> O nosso `Bench` é um verificador mínimo: detecta leitura obsoleta comparando relógios vetoriais. Não checa linearizabilidade — e, como o README registra, nosso sistema não a oferece de qualquer forma.
+> O nosso `Bench` é um verificador mínimo: detecta leitura obsoleta comparando relógios vetoriais, e só avalia leituras que o sistema efetivamente serviu (um 503 é indisponibilidade, não violação). Não checa linearizabilidade — e, como o README registra, nosso sistema não a oferece de qualquer forma. Validar com Maelstrom ficou como trabalho futuro.
 
 ## Injeção de falhas
 
@@ -47,6 +49,8 @@ Contraste central do trabalho: **quórum ≠ consenso**. `R+W > N` dá consistê
 | **tc / netem** | latência e perda no kernel Linux | Linux (requer `NET_ADMIN`) |
 
 > Escolhemos injeção **no processo** (`/chaos/*`) em vez de Toxiproxy ou netem. Justificativa: a equipe desenvolve no Windows, e `netem` exigiria `NET_ADMIN` no contêiner e não se comportaria igual nas três máquinas. O custo é que simulamos perda de mensagem, não falha de kernel.
+>
+> A injeção de latência acabou sendo mais que conveniência: é o que torna a medição de consistência eventual reprodutível. Sem controlar a janela de replicação, o número medido depende de quão ocupada está a máquina — ver [relatório, seção 3.2](relatorio.md#32-por-que-a-janela-precisa-ser-controlada).
 
 ## Observabilidade
 
@@ -56,8 +60,22 @@ Contraste central do trabalho: **quórum ≠ consenso**. `R+W > N` dá consistê
 | **Grafana** | painéis (opcional para a demo) |
 | **OpenTelemetry** | tracing distribuído (não usado; valeria para seguir uma requisição entre réplicas) |
 
+## Ambiente usado nas nossas medições
+
+| Item | Versão |
+|---|---|
+| Docker Engine | 29.9.2 (backend WSL2) |
+| Docker Compose | v5.6.1 |
+| WSL | 3.0.3.0, kernel 6.18.54 |
+| JDK | Eclipse Temurin 21.0.13+9 |
+| Maven | 3.9.16 |
+| Javalin | 6.7.0 |
+| Jackson | 2.19.0 |
+| Micrometer | 1.15.0 |
+| SO | Windows 11 Home 26300 |
+
+Imagem final `minidynamo:1.0.0`: **309 MB** (`eclipse-temurin:21-jre-alpine` + fat jar de 11 MB). Cinco nós ficam `healthy` em ~6 s.
+
 ## A preencher
 
-- [ ] Versões exatas testadas de cada ferramenta citada
-- [ ] Print ou log da comparação com o cluster Cassandra (ver `docker-compose.cassandra.yml`)
-- [ ] Decidir se vale rodar o Maelstrom contra a nossa implementação
+- [ ] Print ou log da comparação com o cluster Cassandra (ver `docker-compose.cassandra.yml`) — o compose está pronto mas a comparação não foi executada

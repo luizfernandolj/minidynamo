@@ -1,0 +1,19 @@
+# Normaliza fim de linha no repositorio para LF e entrega a cada sistema o que
+# ele espera. Sem isto, com tres pessoas em maquinas diferentes, um arquivo
+# aparece inteiro como alterado no diff sem ninguem ter mudado nada.
+* text=auto eol=lf
+
+# Scripts que o PowerShell executa no Windows.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Entram no container Linux: LF obrigatorio.
+*.sh text eol=lf
+Dockerfile text eol=lf
+
+# Binarios: nunca converter.
+*.jar binary
+*.png binary
+*.jpg binary
+*.pdf binary

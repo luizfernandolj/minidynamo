@@ -2,6 +2,7 @@
 . "$PSScriptRoot\lib.ps1"
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
+    Curar   # rede inteira no inicio, mesmo se uma demo anterior foi interrompida
     $chave = "ae-$(Get-Random -Maximum 99999)"
     $pref = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$chave").listaDePreferencia)
     $coord = $pref[0]

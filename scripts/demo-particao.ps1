@@ -2,13 +2,14 @@
 . "$PSScriptRoot\lib.ps1"
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
+    Curar   # rede inteira no inicio, mesmo se uma demo anterior foi interrompida
     $ladoA = @('sp')
     $ladoB = @('rj', 'ba')
 
     # Carrinho guardado em SP e em um dos outros dois.
     $chave = $null
     foreach ($t in 1..300) {
-        $c = "carrinho-$t"
+        $c = "carrinho-$(Get-Random -Maximum 999999)"
         $pref = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)
         if ($pref -contains 'sp') { $chave = $c; break }
     }
@@ -32,7 +33,7 @@ try {
     # Outro carrinho com replica em SP, so para mostrar a recusa.
     $chaveX = $null
     foreach ($t in 1..300) {
-        $c = "carrinho-x$t"
+        $c = "carrinho-x$(Get-Random -Maximum 999999)"
         if ((@((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)) -contains 'sp') { $chaveX = $c; break }
     }
     Linha '~' 'SP tenta confirmar com 2 servidores (forte), em outro carrinho'

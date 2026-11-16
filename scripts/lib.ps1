@@ -42,6 +42,7 @@ function Gravar([string]$no, [string]$chave, [string]$valor, [string]$modo, [int
     $url = "$(Url $no)/kv/${chave}?modo=$modo&w=$w$extra"
     try {
         $r = Invoke-RestMethod -Method Put -Uri $url -Body $corpo -ContentType 'application/json' -TimeoutSec 15
+        $global:UltimaEscrita = $r
         $recado = if ($r.hints) { "  recado: $($r.hints -join ', ')" } else { '' }
         Linha 'ok' "$no grava `"$valor`"  W=$w  confirmaram $($r.replicasOk)/$w$recado"
     } catch {
@@ -51,14 +52,24 @@ function Gravar([string]$no, [string]$chave, [string]$valor, [string]$modo, [int
     }
 }
 
-function Ler([string]$no, [string]$chave, [string]$modo, [int]$r) {
+function Ler([string]$no, [string]$chave, [string]$modo, [int]$r, $recibo = $null) {
+    # $recibo: contexto causal (o que o cliente ja viu). Vai no header X-Contexto.
+    $cabecalhos = @{}
+    if ($recibo) { $cabecalhos['X-Contexto'] = (ConvertTo-Json -Compress $recibo) }
     try {
-        $resp = Invoke-RestMethod "$(Url $no)/kv/${chave}?modo=$modo&r=$r" -TimeoutSec 15
+        $resp = Invoke-RestMethod "$(Url $no)/kv/${chave}?modo=$modo&r=$r" -Headers $cabecalhos -TimeoutSec 15
+        $global:UltimaLeitura = $resp
         if ($resp.conflito) { Linha '!' "$no le -> CONFLITO: $(Valores $resp)  (siblings)" }
         else { Linha 'ok' "$no le -> $(Valores $resp)" }
     } catch {
         $codigo = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { '?' }
-        Linha 'X' "$no le -> RECUSADO (HTTP $codigo)"
+        if ($codigo -eq 404) {
+            # 404 = o servidor ainda nao tem o carrinho. Nao e erro, e leitura vazia.
+            $global:UltimaLeitura = [pscustomobject]@{ valores = @() }
+            Linha '!' "$no le -> (nada)  o servidor ainda nao tem o carrinho"
+        } else {
+            Linha 'X' "$no le -> RECUSADO (HTTP $codigo)"
+        }
     }
 }
 
@@ -80,6 +91,27 @@ function Curar {
     foreach ($no in $NOS) {
         try { Invoke-RestMethod -Method Post -Uri "$(Url $no)/chaos/curar" | Out-Null } catch { }
     }
+}
+
+# Atraso artificial entre servidores. Simula a distancia SP-BA.
+function Latencia([int]$ms) {
+    foreach ($no in $NOS) {
+        Invoke-RestMethod -Method Post -Uri "$(Url $no)/chaos/latencia" `
+            -Body (@{ ms = $ms; jitterMs = 0 } | ConvertTo-Json -Compress) `
+            -ContentType 'application/json' | Out-Null
+    }
+}
+
+# Primeira chave cujas replicas incluem todos os servidores indicados.
+function ChaveEntre([string]$prefixo, [string[]]$nos) {
+    # Chave nova a cada execucao. Chave reutilizada ja traz o valor replicado
+    # de rodadas anteriores, e a demo deixa de mostrar o atraso.
+    foreach ($t in 1..300) {
+        $c = "$prefixo$(Get-Random -Maximum 999999)"
+        $p = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)
+        if (@($nos | Where-Object { $p -contains $_ }).Count -eq $nos.Count) { return $c }
+    }
+    throw "nenhuma chave com replicas em $($nos -join ' e ')"
 }
 
 # Quantos recados ainda estao pendentes no cluster inteiro.

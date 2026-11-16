@@ -3,10 +3,11 @@ param([string]$NoAlvo = 'rj')
 . "$PSScriptRoot\lib.ps1"
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
+    Curar   # rede inteira no inicio, mesmo se uma demo anterior foi interrompida
     # Carrinho que tem o servidor que vai cair entre os dois donos.
     $chave = $null
     foreach ($t in 1..300) {
-        $c = "queda-$t"
+        $c = "queda-$(Get-Random -Maximum 999999)"
         $pref = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)
         if ($pref -contains $NoAlvo) { $chave = $c; break }
     }
@@ -27,7 +28,7 @@ try {
     # Outro carrinho com o servidor que caiu, so para mostrar a recusa sem recado.
     $chaveX = $null
     foreach ($t in 1..300) {
-        $c = "queda-x$t"
+        $c = "queda-x$(Get-Random -Maximum 999999)"
         $pX = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)
         if ($pX -contains $NoAlvo) {
             $chaveX = $c

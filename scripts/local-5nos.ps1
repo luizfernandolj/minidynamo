@@ -1,11 +1,8 @@
-# Sobe 5 nos como processos locais, sem Docker.
-#
-# Serve para desenvolver antes de o Docker estar disponivel e para depurar com
-# o debugger da IDE acoplado. O enunciado aceita "3 nos/processos comunicando-se
-# via rede", e e o caso aqui -- mas a entrega final deve usar docker compose.
+# Sobe os 3 servidores (sp, rj, ba) como processos locais, sem Docker.
+# Plano B da apresentacao: os scripts de demo funcionam igual, nas mesmas portas.
 #
 #   .\scripts\local-5nos.ps1            # sobe
-#   .\scripts\local-5nos.ps1 -Parar     # mata todos
+#   .\scripts\local-5nos.ps1 -Parar     # encerra
 
 param([switch]$Parar)
 
@@ -13,9 +10,7 @@ $ErrorActionPreference = 'Stop'
 $raiz = Split-Path -Parent $PSScriptRoot
 $jar = Join-Path $raiz 'target\minidynamo.jar'
 
-# Logs e pid ficam FORA de target/: 'mvn clean' apaga target, e com os nos no ar
-# o clean falha por nao conseguir deletar um log aberto -- alem de levar embora
-# o arquivo de pid, deixando processos orfaos.
+# Logs e pid ficam fora de target/: 'mvn clean' apaga target.
 $logs = Join-Path $raiz 'logs'
 $pidFile = Join-Path $logs 'nos-locais.pid'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
@@ -23,60 +18,55 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 if ($Parar) {
     if (Test-Path $pidFile) {
         Get-Content $pidFile | ForEach-Object {
-            $processId = [int]$_
-            try {
-                Stop-Process -Id $processId -Force -ErrorAction Stop
-                "no encerrado (pid $processId)"
-            } catch {
-                "pid $processId ja nao estava rodando"
-            }
+            try { Stop-Process -Id ([int]$_) -Force -ErrorAction Stop; "servidor encerrado (pid $_)" }
+            catch { "pid $_ ja nao estava rodando" }
         }
         Remove-Item $pidFile -Force
     } else {
-        'nenhum arquivo de pid encontrado; nada a parar'
+        'nenhum pid registrado; nada a parar'
     }
     return
 }
 
 if (-not $env:JAVA_HOME) { $env:JAVA_HOME = 'C:\Users\luiz_\tools\jdk-21.0.13+9' }
 $java = Join-Path $env:JAVA_HOME 'bin\java.exe'
+if (-not (Test-Path $jar)) { throw "jar nao encontrado em $jar -- rode: mvn -B -DskipTests package" }
 
-if (-not (Test-Path $jar)) {
-    throw "jar nao encontrado em $jar -- rode primeiro: mvn -B -DskipTests package"
-}
-
-# Todos os nos recebem a mesma string PEERS. Portas 8081..8085.
-$peers = (1..5 | ForEach-Object { "node$_@127.0.0.1:808$_" }) -join ','
+$servidores = @(
+    @{ id = 'sp'; porta = 8081 }
+    @{ id = 'rj'; porta = 8082 }
+    @{ id = 'ba'; porta = 8083 }
+)
+$peers = ($servidores | ForEach-Object { "$($_.id)@127.0.0.1:$($_.porta)" }) -join ','
 
 $pids = @()
-foreach ($i in 1..5) {
-    $env:NODE_ID = "node$i"
-    $env:HTTP_PORT = "808$i"
+foreach ($s in $servidores) {
+    $env:NODE_ID = $s.id
+    $env:HTTP_PORT = "$($s.porta)"
     $env:PEERS = $peers
-    $env:REPLICATION_N = '3'
+    $env:REPLICATION_N = '2'
+    $env:DEFAULT_R = '2'
+    $env:DEFAULT_W = '2'
     $env:VNODES = '128'
 
-    $p = Start-Process -FilePath $java `
-        -ArgumentList '-Xmx128m', '-jar', $jar `
+    $p = Start-Process -FilePath $java -ArgumentList '-Xmx128m', '-jar', $jar `
         -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $logs "node$i.log") `
-        -RedirectStandardError  (Join-Path $logs "node$i.err")
-
+        -RedirectStandardOutput (Join-Path $logs "$($s.id).log") `
+        -RedirectStandardError  (Join-Path $logs "$($s.id).err")
     $pids += $p.Id
-    "node$i  ->  http://localhost:808$i   (pid $($p.Id))"
+    "$($s.id)  ->  http://localhost:$($s.porta)   (pid $($p.Id))"
 }
 $pids | Set-Content $pidFile
 
 Start-Sleep -Seconds 2
 ''
-'verificando /health de cada no:'
-foreach ($i in 1..5) {
+foreach ($s in $servidores) {
     try {
-        $r = Invoke-RestMethod "http://localhost:808$i/health" -TimeoutSec 5
-        "  node$i  OK   chaves=$($r.chaveslocais)"
+        $r = Invoke-RestMethod "http://localhost:$($s.porta)/health" -TimeoutSec 5
+        "  $($s.id)  OK"
     } catch {
-        "  node$i  FALHOU  -- veja logs\node$i.err"
+        "  $($s.id)  FALHOU -- veja logs\$($s.id).err"
     }
 }
 ''
-"para parar:  .\scripts\local-5nos.ps1 -Parar"
+"para encerrar:  .\scripts\local-5nos.ps1 -Parar"

@@ -1,10 +1,15 @@
 # Funcoes compartilhadas pelas demos. Saida curta: uma linha por evento.
 # Somente ASCII: o PowerShell 5.1 le .ps1 sem BOM como ANSI e quebra acentos.
+#
+# Servidores: sp (SP, mais perto), rj (RJ), ba (BA, mais longe).
 $ErrorActionPreference = 'Stop'
 $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;$env:PATH"
 
+$NOS = @('sp', 'rj', 'ba')
+$PORTAS = @{ sp = 8081; rj = 8082; ba = 8083 }
+
 function Url([string]$no) {
-    "http://localhost:808$([int]($no -replace '\D', ''))"
+    "http://localhost:$($PORTAS[$no])"
 }
 
 function Cabecalho([string]$numero, [string]$titulo) {
@@ -13,7 +18,7 @@ function Cabecalho([string]$numero, [string]$titulo) {
 }
 
 function Linha([string]$simbolo, [string]$texto) {
-    # ok = deu certo | X = recusado/falhou | ~ = acao do roteiro | ! = conflito | > = informacao
+    # ok = deu certo | X = recusado/falhou | ~ = acao do roteiro | ! = conflito/perda | > = informacao
     "  [$simbolo] $texto"
 }
 
@@ -23,7 +28,7 @@ function Valores($resposta) {
     return ($v -join ' + ')
 }
 
-# Estado LOCAL da replica, lido direto no no (nao passa pelo coordenador,
+# Estado LOCAL do servidor, lido direto nele (nao passa pelo coordenador,
 # logo nao dispara read repair).
 function Estado([string]$no, [string]$chave) {
     $d = Invoke-RestMethod "$(Url $no)/debug/dump" -TimeoutSec 10
@@ -57,7 +62,7 @@ function Ler([string]$no, [string]$chave, [string]$modo, [int]$r) {
     }
 }
 
-# Corta a comunicacao entre dois grupos de nos, nos dois sentidos.
+# Corta a comunicacao entre dois grupos de servidores, nos dois sentidos.
 function Cortar([string[]]$lado1, [string[]]$lado2) {
     foreach ($no in $lado1) {
         Invoke-RestMethod -Method Post -Uri "$(Url $no)/chaos/particao" `
@@ -72,16 +77,16 @@ function Cortar([string[]]$lado1, [string[]]$lado2) {
 }
 
 function Curar {
-    foreach ($i in 1..5) {
-        try { Invoke-RestMethod -Method Post -Uri "http://localhost:808$i/chaos/curar" | Out-Null } catch { }
+    foreach ($no in $NOS) {
+        try { Invoke-RestMethod -Method Post -Uri "$(Url $no)/chaos/curar" | Out-Null } catch { }
     }
 }
 
 # Quantos recados ainda estao pendentes no cluster inteiro.
 function RecadosPendentes {
     $total = 0
-    foreach ($i in 1..5) {
-        try { $total += (Invoke-RestMethod "http://localhost:808$i/debug/hints" -TimeoutSec 3).total } catch { }
+    foreach ($no in $NOS) {
+        try { $total += (Invoke-RestMethod "$(Url $no)/debug/hints" -TimeoutSec 3).total } catch { }
     }
     return $total
 }

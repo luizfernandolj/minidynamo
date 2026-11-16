@@ -1,9 +1,15 @@
-# Cinco nos identicos. O unico diferencial entre eles e NODE_ID: a topologia
-# inteira vem da variavel PEERS, igual para todos.
+# Tres servidores, um por cidade:
+#   sp  -> SP, o mais perto do usuario
+#   rj  -> RJ, mais longe
+#   ba  -> BA, mais longe ainda
 #
-#   docker compose up --build          -> sobe o cluster
-#   docker compose --profile bench run --rm bench   -> roda um experimento
-#   docker compose stop node3          -> cenario de falha: queda de no
+# N=2: cada carrinho fica em 2 dos 3 servidores. O terceiro nao guarda o
+# carrinho, mas pode receber um "recado" (hinted handoff) quando um dos dois
+# esta fora. Com N=3 e 3 servidores nao haveria terceiro para o recado.
+#
+#   docker compose up -d --build                     -> sobe os 3
+#   docker compose --profile bench run --rm bench    -> roda um experimento
+#   docker compose stop rj                           -> derruba um servidor
 
 x-no-comum: &no-comum
   build: .
@@ -19,92 +25,69 @@ x-no-comum: &no-comum
 
 x-env-comum: &env-comum
   HTTP_PORT: "8080"
-  PEERS: "node1@node1:8080,node2@node2:8080,node3@node3:8080,node4@node4:8080,node5@node5:8080"
+  PEERS: "sp@sp:8080,rj@rj:8080,ba@ba:8080"
 
-  # N = quantas replicas cada chave tem. Fixo no cluster.
-  REPLICATION_N: "3"
-  # R e W sao por REQUISICAO (?r= e ?w=). Estes sao so os padroes de quando o
-  # cliente nao manda nada e nao escolhe modo: quorum de N, ou seja 2 de 3.
+  # N = quantos servidores guardam cada carrinho. Fixo no cluster.
+  REPLICATION_N: "2"
+  # R e W sao por REQUISICAO (?r= e ?w=). Estes sao os padroes quando o cliente
+  # nao escolhe: com N=2, quorum = 2 de 2.
   DEFAULT_R: "2"
   DEFAULT_W: "2"
 
-  # Nos virtuais por no fisico. Mais vnodes = carga mais uniforme.
+  # Nos virtuais por servidor. Mais = carga mais uniforme.
   VNODES: "128"
 
-  # Timeout de uma chamada a uma replica, e o prazo total que o coordenador
-  # espera para juntar R ou W respostas.
+  # Timeout de uma chamada a um servidor, e o prazo total para juntar R ou W
+  # respostas.
   RPC_TIMEOUT_MS: "800"
   REPLICATION_TIMEOUT_MS: "1500"
 
-  # Intervalo do laco que reentrega as escritas guardadas em nome de nos que
-  # estavam fora. Domina o TEMPO DE RECUPERACAO medido na demo de queda:
-  # baixar para 500 reduz o tempo e aumenta o trafego de fundo.
+  # Intervalo do laco que reentrega os recados. Domina o tempo de recuperacao
+  # medido na demo de queda.
   HINT_DELIVERY_MS: "2000"
 
-  # Intervalo da anti-entropia (troca de digest com um par sorteado). Domina o
-  # tempo de convergencia sem leitura. ANTI_ENTROPY_ENABLED=false desliga, o
-  # que serve para mostrar que sem ela a divergencia persiste.
+  # Intervalo da anti-entropia (troca de resumo com um par sorteado). Domina o
+  # tempo de convergencia sem leitura.
   ANTI_ENTROPY_MS: "5000"
   ANTI_ENTROPY_ENABLED: "true"
 
 services:
-  node1:
+  sp:
     <<: *no-comum
-    container_name: md-node1
+    container_name: md-sp
     environment:
       <<: *env-comum
-      NODE_ID: node1
+      NODE_ID: sp
     ports: ["8081:8080"]
 
-  node2:
+  rj:
     <<: *no-comum
-    container_name: md-node2
+    container_name: md-rj
     environment:
       <<: *env-comum
-      NODE_ID: node2
+      NODE_ID: rj
     ports: ["8082:8080"]
 
-  node3:
+  ba:
     <<: *no-comum
-    container_name: md-node3
+    container_name: md-ba
     environment:
       <<: *env-comum
-      NODE_ID: node3
+      NODE_ID: ba
     ports: ["8083:8080"]
 
-  node4:
-    <<: *no-comum
-    container_name: md-node4
-    environment:
-      <<: *env-comum
-      NODE_ID: node4
-    ports: ["8084:8080"]
-
-  node5:
-    <<: *no-comum
-    container_name: md-node5
-    environment:
-      <<: *env-comum
-      NODE_ID: node5
-    ports: ["8085:8080"]
-
-  # Gerador de carga + verificador de consistencia. Nao sobe com o cluster:
-  # roda sob demanda e termina, anexando uma linha em resultados/resultados.csv.
-  #
-  #   docker compose --profile bench run --rm bench --modo=eventual --rotulo=R1W1
+  # Gerador de carga e verificador de consistencia. Nao sobe com o cluster.
   bench:
     build: .
     image: minidynamo:1.0.0
     profiles: ["bench"]
     networks: [dynamo]
     depends_on:
-      node1: {condition: service_healthy}
-      node2: {condition: service_healthy}
-      node3: {condition: service_healthy}
-      node4: {condition: service_healthy}
-      node5: {condition: service_healthy}
+      sp: {condition: service_healthy}
+      rj: {condition: service_healthy}
+      ba: {condition: service_healthy}
     environment:
-      NODES: "http://node1:8080,http://node2:8080,http://node3:8080,http://node4:8080,http://node5:8080"
+      NODES: "http://sp:8080,http://rj:8080,http://ba:8080"
     volumes:
       - ./resultados:/app/resultados
     entrypoint: ["java", "-cp", "/app/minidynamo.jar", "sd.minidynamo.bench.Bench"]

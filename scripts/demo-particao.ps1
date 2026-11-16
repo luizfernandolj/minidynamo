@@ -1,50 +1,51 @@
-# Demo 1: particao de rede. Uso: .\scripts\demo-particao.ps1
+# Demo 1: cabo entre SP e o resto cai. Uso: .\scripts\demo-particao.ps1
 . "$PSScriptRoot\lib.ps1"
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
-    $lado1 = @('node1', 'node2')
-    $lado2 = @('node3', 'node4', 'node5')
+    $ladoA = @('sp')
+    $ladoB = @('rj', 'ba')
 
-    # Escolhe uma chave com replicas dos DOIS lados, senao a demo nao divide nada.
+    # Carrinho guardado em SP e em um dos outros dois.
     $chave = $null
     foreach ($t in 1..300) {
         $c = "carrinho-$t"
-        $pref = @((Invoke-RestMethod "$(Url node1)/debug/anel?chave=$c").listaDePreferencia)
-        if (($pref | Where-Object { $lado1 -contains $_ }) -and ($pref | Where-Object { $lado2 -contains $_ })) {
-            $chave = $c; break
-        }
+        $pref = @((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)
+        if ($pref -contains 'sp') { $chave = $c; break }
     }
-    if (-not $chave) { throw 'nenhuma chave com replicas dos dois lados' }
-    $ladoA = $pref | Where-Object { $lado1 -contains $_ } | Select-Object -First 1
-    $ladoB = $pref | Where-Object { $lado2 -contains $_ } | Select-Object -First 1
+    if (-not $chave) { throw 'nenhum carrinho com replica em SP' }
+    $outro = @($pref | Where-Object { $_ -ne 'sp' })[0]
 
-    Cabecalho 1 'Particao de rede'
-    Linha '>' "chave $chave  replicas: $($pref -join ', ')"
-    Linha '>' "lado A: $($lado1 -join ', ')   lado B: $($lado2 -join ', ')"
+    Cabecalho 1 'Cabo SP x resto'
+    Linha '>' "carrinho $chave  guardado em: $($pref -join ', ')"
+    Linha '>' 'lado A: sp (sozinho)    lado B: rj, ba'
 
     Gravar $pref[0] $chave 'inicial' forte 2
 
-    Linha '~' 'cortando a rede'
-    Cortar $lado1 $lado2
+    Linha '~' 'cabo cai: SP fica isolado'
+    Cortar $ladoA $ladoB
 
-    Gravar $ladoA $chave 'minoria' eventual 1 '&sloppy=false'
-    Gravar $ladoB $chave 'maioria' eventual 1 '&sloppy=false'
-    Linha '>' 'valor em cada replica:'
+    Gravar sp $chave 'livro' eventual 1 '&sloppy=false'
+    Gravar $outro $chave 'caneta' eventual 1 '&sloppy=false'
+    Linha '>' 'carrinho em cada servidor:'
     foreach ($no in $pref) { "      $no  $(Estado $no $chave)" }
 
-    # Outra chave, so para mostrar a recusa: exigir W=3 com o lado A isolado.
-    Linha '~' 'lado A tenta W=3 numa chave separada'
-    Gravar $ladoA "$chave-x" 'tentativa' forte 3
+    # Outro carrinho com replica em SP, so para mostrar a recusa.
+    $chaveX = $null
+    foreach ($t in 1..300) {
+        $c = "carrinho-x$t"
+        if ((@((Invoke-RestMethod "$(Url sp)/debug/anel?chave=$c").listaDePreferencia)) -contains 'sp') { $chaveX = $c; break }
+    }
+    Linha '~' 'SP tenta confirmar com 2 servidores (forte), em outro carrinho'
+    Gravar sp $chaveX 'livro' forte 2
 
-    Linha '~' 'religando a rede'
+    Linha '~' 'cabo volta'
     Curar
-    # R=3 consulta as tres replicas, entao o reparo alcanca todas.
-    Ler $ladoA $chave forte 3
+    Ler sp $chave forte 2
     Start-Sleep -Seconds 1
 
-    Linha '>' 'valor em cada replica depois da leitura:'
+    Linha '>' 'carrinho em cada servidor depois da leitura:'
     foreach ($no in $pref) { "      $no  $(Estado $no $chave)" }
     ''
-    Linha '>' 'nada foi apagado: o conflito foi devolvido para a aplicacao resolver'
+    Linha '>' 'nenhum item perdido: a aplicacao junta livro + caneta'
 }
 finally { Pop-Location }

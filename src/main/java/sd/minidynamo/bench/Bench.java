@@ -204,8 +204,7 @@ public final class Bench {
                 }
             }
             String nosRaw = valor(mapa, "nos", "NODES",
-                    "http://localhost:8081,http://localhost:8082,http://localhost:8083," +
-                    "http://localhost:8084,http://localhost:8085");
+                    "http://localhost:8081,http://localhost:8082,http://localhost:8083");
 
             return new BenchConfig(
                     Arrays.stream(nosRaw.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList(),

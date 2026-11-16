@@ -20,12 +20,32 @@ x-no-comum: &no-comum
 x-env-comum: &env-comum
   HTTP_PORT: "8080"
   PEERS: "node1@node1:8080,node2@node2:8080,node3@node3:8080,node4@node4:8080,node5@node5:8080"
-  # N = quantas replicas cada chave tem. R e W sao por requisicao; estes sao
-  # apenas os padroes quando o cliente nao manda nada.
+
+  # N = quantas replicas cada chave tem. Fixo no cluster.
   REPLICATION_N: "3"
+  # R e W sao por REQUISICAO (?r= e ?w=). Estes sao so os padroes de quando o
+  # cliente nao manda nada e nao escolhe modo: quorum de N, ou seja 2 de 3.
+  DEFAULT_R: "2"
+  DEFAULT_W: "2"
+
+  # Nos virtuais por no fisico. Mais vnodes = carga mais uniforme.
   VNODES: "128"
+
+  # Timeout de uma chamada a uma replica, e o prazo total que o coordenador
+  # espera para juntar R ou W respostas.
   RPC_TIMEOUT_MS: "800"
   REPLICATION_TIMEOUT_MS: "1500"
+
+  # Intervalo do laco que reentrega as escritas guardadas em nome de nos que
+  # estavam fora. Domina o TEMPO DE RECUPERACAO medido na demo de queda:
+  # baixar para 500 reduz o tempo e aumenta o trafego de fundo.
+  HINT_DELIVERY_MS: "2000"
+
+  # Intervalo da anti-entropia (troca de digest com um par sorteado). Domina o
+  # tempo de convergencia sem leitura. ANTI_ENTROPY_ENABLED=false desliga, o
+  # que serve para mostrar que sem ela a divergencia persiste.
+  ANTI_ENTROPY_MS: "5000"
+  ANTI_ENTROPY_ENABLED: "true"
 
 services:
   node1:

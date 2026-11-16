@@ -67,13 +67,13 @@ mvn -B -DskipTests package
 ```
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\scripts\local-5nos.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\local-3servidores.ps1
 ```
 
 Encerrar o plano B:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\scripts\local-5nos.ps1 -Parar
+powershell -ExecutionPolicy Bypass -File .\scripts\local-3servidores.ps1 -Parar
 ```
 
 Reiniciar o cluster do zero:

@@ -1,8 +1,8 @@
 # Sobe os 3 servidores (sp, rj, ba) como processos locais, sem Docker.
 # Plano B da apresentacao: os scripts de demo funcionam igual, nas mesmas portas.
 #
-#   .\scripts\local-5nos.ps1            # sobe
-#   .\scripts\local-5nos.ps1 -Parar     # encerra
+#   .\scripts\local-3servidores.ps1            # sobe
+#   .\scripts\local-3servidores.ps1 -Parar     # encerra
 
 param([switch]$Parar)
 
@@ -69,4 +69,4 @@ foreach ($s in $servidores) {
     }
 }
 ''
-"para encerrar:  .\scripts\local-5nos.ps1 -Parar"
+"para encerrar:  .\scripts\local-3servidores.ps1 -Parar"

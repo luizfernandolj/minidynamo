@@ -15,7 +15,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * estado do no, alteravel por HTTP ao vivo durante a apresentacao.
  *
  * Importante para o relatorio: isto simula a PERDA DE MENSAGEM, nao a queda do
- * processo. A queda real se demonstra com 'docker compose stop node3' -- e os
+ * processo. A queda real se demonstra com 'docker compose stop rj' -- e os
  * dois cenarios tem comportamentos diferentes, o que vale discutir.
  */
 public final class Chaos {

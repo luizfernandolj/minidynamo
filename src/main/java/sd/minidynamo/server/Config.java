@@ -10,7 +10,7 @@ import java.util.Map;
  * docker-compose.yml seja a unica fonte da topologia.
  *
  * PEERS usa a forma "id@host:porta,id@host:porta,...". O proprio no aparece na
- * lista: assim os cinco containers recebem exatamente a mesma string e nada
+ * lista: assim todos os containers recebem exatamente a mesma string e nada
  * precisa ser calculado por no.
  */
 public record Config(

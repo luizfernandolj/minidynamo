@@ -198,7 +198,10 @@ Três pontos, nesta ordem:
 > Não, e é importante. Faltam atomicidade entre réplicas e tratamento de leituras concorrentes durante escrita em curso. É consistência de quórum.
 
 **"Por que não Cassandra direto?"**
-> Temos um compose de Cassandra de 3 nós para comparar (`docker-compose.cassandra.yml`). A diferença conceitual: Cassandra resolve conflito por last-writer-wins e descarta a escrita concorrente em silêncio; nós expomos siblings, como Riak e o Dynamo original.
+> Rodamos a comparação (`.\scripts\demo-cassandra.ps1`, cluster de 3 nós com RF=3). Os níveis correspondem: ONE ≈ nosso eventual, QUORUM ≈ nosso forte, ALL ≈ `w=3 sloppy=false`. Duas diferenças conceituais: Cassandra resolve conflito por last-writer-wins e descarta a escrita concorrente em silêncio, enquanto nós expomos siblings; e os hints do Cassandra **não contam para o nível de consistência**, então `CL=ALL` recusa com um nó fora, enquanto nosso `W=3 sloppy=true` aceita. São escolhas diferentes sobre o mesmo trade-off.
+
+**"Vocês mediram contra algum sistema real?"**
+> Sim, e é o slide de bônus: com um nó de 3 fora, Cassandra recusa CL=ALL com `required_replicas: 3, alive_replicas: 2` — exatamente o que nosso `w=3 sloppy=false` faz. Custo: 1,2 GB por nó de Cassandra contra 105 MB por nó nosso.
 
 **"O que acontece se dois clientes escreverem ao mesmo tempo sem ler antes?"**
 > Escrita cega: cada coordenador parte do vetor que conhece e gera versões concorrentes. Vira sibling. É o comportamento correto — o alternativo seria perder uma das escritas.

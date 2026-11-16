@@ -176,7 +176,25 @@ Verificado por teste automatizado ([HashRingTest](../src/test/java/sd/minidynamo
 
 Um segundo teste verifica a propriedade de hashing consistente: ao remover um nó de 5, **menos de 30% das chaves** trocam de dono — próximo do 1/5 teórico, e não as 100% que um `hash % N` provocaria.
 
-### 4.6 Métricas expostas
+### 4.6 Comparação com Cassandra
+
+Subimos um cluster Cassandra 5.0 de 3 nós com RF=3 e rodamos a mesma demonstração ([demo-cassandra.ps1](../scripts/demo-cassandra.ps1)), com um nó derrubado:
+
+| Nível | Leitura | Escrita | Equivalente no MiniDynamo |
+|---|---|---|---|
+| `ONE` | OK | aceita | `modo=eventual` (`R=W=1`) |
+| `QUORUM` | OK | aceita | `modo=forte` (`R=W=2`) |
+| `ALL` | **recusada** | **recusada** | `w=3` com `sloppy=false` |
+
+Recusa exata: `Cannot achieve consistency level ALL`, `required_replicas: 3, alive_replicas: 2`.
+
+**A descoberta da comparação** é mais interessante que a correspondência. O Cassandra também guarda hints para a réplica fora, mas **esses hints não contam para o nível de consistência**: `CL=ALL` foi recusada mesmo sendo possível armazenar um hint. No Cassandra, hinted handoff é mecanismo de **reparo**; no Dynamo original — e no nosso `?sloppy=true` — o ack do substituto **conta para W**, e foi por isso que nossa escrita `W=3` foi aceita na mesma falha em que a do Cassandra foi recusada.
+
+Nenhuma das duas decisões está errada: o Cassandra preserva a interseção de quóruns e sacrifica disponibilidade; o Dynamo faz o oposto. Foi essa comparação que nos convenceu a tornar o `sloppy` explícito em vez de ligá-lo em silêncio.
+
+Consumo: ~1,2 GB por nó de Cassandra contra ~105 MB por nó do MiniDynamo.
+
+### 4.7 Métricas expostas
 
 Em `/metrics`, formato Prometheus, com percentis calculados no nó:
 

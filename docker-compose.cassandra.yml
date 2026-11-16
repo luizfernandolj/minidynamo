@@ -34,12 +34,19 @@ x-cass-comum: &cass-comum
     CASSANDRA_DC: dc1
     MAX_HEAP_SIZE: 512M
     HEAP_NEWSIZE: 128M
+  # O healthcheck precisa provar que o no esta SERVINDO, nao apenas que ele
+  # proprio esta UN. Com 'nodetool status | grep -q ^UN' o no se declara
+  # saudavel enquanto ainda esta entrando no anel; o proximo no entao comeca a
+  # bootstrapar em paralelo e o Cassandra nao tolera joins simultaneos -- o
+  # terceiro no morre em TokenMetadata.addBootstrapTokens. 'cqlsh -e' so
+  # responde depois que o transporte nativo esta ativo, o que serializa os
+  # joins de verdade.
   healthcheck:
-    test: ["CMD-SHELL", "nodetool status | grep -q '^UN'"]
+    test: ["CMD-SHELL", "cqlsh -e 'describe cluster' > /dev/null 2>&1"]
     interval: 15s
-    timeout: 10s
-    retries: 20
-    start_period: 60s
+    timeout: 15s
+    retries: 30
+    start_period: 90s
   networks: [cass]
 
 services:

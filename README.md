@@ -74,6 +74,13 @@ Esse contraste é, ele próprio, um resultado — e está discutido no [relatór
 | Queda de nó → recuperação por hinted handoff | **8,19 s** | [demo-queda-de-no.ps1](scripts/demo-queda-de-no.ps1) |
 | Convergência sem leitura, por anti-entropia | **5,16 s** | [demo-anti-entropia.ps1](scripts/demo-anti-entropia.ps1) |
 | Partição de rede → divergência e siblings | qualitativo | [demo-particao.ps1](scripts/demo-particao.ps1) |
+| Comparação com Cassandra 5.0 (3 nós, RF=3) | ONE/QUORUM ok, ALL recusa | [demo-cassandra.ps1](scripts/demo-cassandra.ps1) |
+
+### A diferença que a comparação com Cassandra revelou
+
+Com um nó de 3 fora, o Cassandra recusa `CL=ALL` (`required_replicas: 3, alive_replicas: 2`) — **mesmo guardando hint** para o nó derrubado. No Cassandra, hinted handoff é mecanismo de **reparo** e não conta para o nível de consistência. No Dynamo original, e no nosso `?sloppy=true`, o ack do substituto **conta para W** — e por isso nossa escrita `W=3` é aceita na mesma falha em que a do Cassandra é recusada.
+
+Nenhuma das duas está errada: Cassandra preserva a interseção de quóruns e sacrifica disponibilidade; Dynamo faz o oposto. Foi essa comparação que nos levou a tornar o `sloppy` um parâmetro explícito.
 
 ---
 
@@ -218,6 +225,18 @@ Isola uma réplica, escreve com `sloppy=false` (zero hints), cura a partição e
 ```powershell
 .\scripts\experimentos.ps1 -LatenciaMs 120 -JitterMs 40
 ```
+
+### 5. Comparação com Cassandra
+
+```bash
+docker compose -f docker-compose.cassandra.yml up -d
+```
+
+```powershell
+.\scripts\demo-cassandra.ps1
+```
+
+Pede ~1,2 GB por nó e o anel leva ~70 s por nó para formar. Ver o [levantamento de ferramentas](docs/ferramentas.md#comparação-executada-cassandra-50-3-nós-rf3) para os resultados.
 
 ---
 
